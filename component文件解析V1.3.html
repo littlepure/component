@@ -1,0 +1,1337 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <!-- 20250524 v1.0 首版 -->
+    <!-- 20250526 V1.1 修正G7平台CPU最大频率检测机制 maxSpeedCell.textContent = item.MaxSpeedMHz || item.max_speed || 'N/A';-->
+    <!-- 20250530 V1.2 新增解析RESTful HDD info部分 -->
+    <!-- 20250531 V1.3 新增mem_mod_part_num展示 -->
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>日志文件解析器</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            line-height: 1.6;
+            color: #333;
+            margin: 0;
+            padding: 20px;
+            background-color: #f8f9fa;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        
+        h1, h2 {
+            color: #2c3e50;
+        }
+        
+        .drag-area {
+            border: 2px dashed #3498db;
+            border-radius: 8px;
+            padding: 30px;
+            text-align: center;
+            margin-bottom: 30px;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        
+        .drag-area:hover {
+            background-color: rgba(52, 152, 219, 0.2);
+        }
+        
+        .drag-area p {
+            color: #3498db;
+            font-size: 18px;
+        }
+        
+        .file-info {
+            font-size: 14px;
+            color: #7f8c8d;
+            margin-top: 10px;
+        }
+        
+        .results-container {
+            margin-top: 30px;
+            display: none;
+        }
+        
+        .result-section {
+            margin-bottom: 30px;
+            padding: 15px;
+            border-radius: 5px;
+            background-color: #f8f9fa;
+            border-left: 4px solid #3498db;
+        }
+        
+        .result-section h3 {
+            margin-top: 0;
+            color: #2c3e50;
+            border-bottom: 1px solid #e9ecef;
+            padding-bottom: 10px;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: 'Arial', sans-serif;
+            margin-top: 15px;
+        }
+        
+        th, td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        th {
+            background-color: #f2f2f2;
+            font-weight: bold;
+            color: #555;
+        }
+        
+        tr:hover {
+            background-color: #f5f5f5;
+        }
+        
+        .error-message {
+            color: #e74c3c;
+            padding: 10px;
+            background-color: #fadbd8;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        .status-bar {
+            font-size: 14px;
+            color: #7f8c8d;
+            margin-top: 20px;
+            text-align: center;
+        }
+        
+        .expand-btn {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        
+        .expand-btn:hover {
+            background-color: #2980b9;
+        }
+        
+        .unparsed-content {
+            font-family: monospace;
+            white-space: pre-wrap;
+            line-height: 1.5;
+            background-color: #f1f8ff;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 15px;
+        }
+        
+        .error-content {
+            font-family: monospace;
+            white-space: pre-wrap;
+            line-height: 1.5;
+            background-color: #fef2f2;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 15px;
+            color: #e74c3c;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>日志文件解析器</h1>
+        <p>拖拽日志文件到下方区域进行解析，将自动提取 RESTful 相关信息并以表格形式展示</p>
+        
+        <div id="dragArea" class="drag-area">
+            <p>拖拽文件到这里 或 点击选择文件</p>
+            <div class="file-info" id="fileInfo">无文件选择</div>
+            <input type="file" id="fileInput" style="display: none;" accept=".log">
+        </div>
+        
+        <div id="resultsContainer" class="results-container">
+            <h2>解析结果</h2>
+            <div id="versionInfo" class="result-section hidden">
+                <h3>RESTful 版本信息</h3>
+                <div id="versionTable"></div>
+            </div>
+            
+            <div id="cpuInfo" class="result-section hidden">
+                <h3>RESTful CPU 信息</h3>
+                <div id="cpuTable"></div>
+            </div>
+            
+            <div id="memoryInfo" class="result-section hidden">
+                <h3>RESTful 内存信息</h3>
+                <div id="memoryTable"></div>
+            </div>
+            
+            <div id="psuInfo" class="result-section hidden">
+                <h3>RESTful 电源信息</h3>
+                <div id="psuTable"></div>
+                
+                <h3>storage_batteries</h3>
+                <div id="batteryTable"></div>
+            </div>
+            
+            <div id="pcieInfo" class="result-section hidden">
+                <h3>RESTful PCIe 设备信息</h3>
+                <div id="pcieTable"></div>
+            </div>
+            
+            <div id="networkInfo" class="result-section hidden">
+                <h3>RESTful 网络适配器信息</h3>
+                <div id="networkTable"></div>
+            </div>
+            
+            <div id="fanInfo" class="result-section hidden">
+                <h3>RESTful 风扇信息</h3>
+                <div id="fanTable"></div>
+            </div>
+            
+            <div id="diskbackplaneInfo" class="result-section hidden">
+                <h3>RESTful 磁盘背板信息</h3>
+                <div id="diskbackplaneTable"></div>
+            </div>
+            
+            <div id="fruInfo" class="result-section hidden">
+                <h3>RESTful FRU 信息</h3>
+                <div id="fruTable"></div>
+            </div>
+            
+            <div id="hddInfo" class="result-section hidden">
+                <h3>RESTful HDD 信息</h3>
+                <div id="hddTable"></div>
+            </div>
+            
+            <div id="unparsedInfo" class="result-section hidden">
+                <h3>其它文本内容</h3>
+                <div id="unparsedContent" class="unparsed-content"></div>
+            </div>
+        </div>
+        
+        <div id="errorMessage" class="error-message hidden"></div>
+        
+        <div class="status-bar">
+            <span id="statusText">等待文件...</span>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const dragArea = document.getElementById('dragArea');
+            const fileInput = document.getElementById('fileInput');
+            const resultsContainer = document.getElementById('resultsContainer');
+            const errorMessage = document.getElementById('errorMessage');
+            const statusText = document.getElementById('statusText');
+            const fileInfo = document.getElementById('fileInfo');
+            
+            // 拖拽相关事件
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                dragArea.addEventListener(eventName, preventDefaults, false);
+            });
+            
+            function preventDefaults(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dragArea.addEventListener(eventName, highlight, false);
+            });
+            
+            ['dragleave', 'drop'].forEach(eventName => {
+                dragArea.addEventListener(eventName, unhighlight, false);
+            });
+            
+            function highlight() {
+                dragArea.style.backgroundColor = 'rgba(52, 152, 219, 0.2)';
+                dragArea.style.borderColor = '#2980b9';
+            }
+            
+            function unhighlight() {
+                dragArea.style.backgroundColor = '';
+                dragArea.style.borderColor = '#3498db';
+            }
+            
+            // 点击拖拽区触发文件选择
+            dragArea.addEventListener('click', function() {
+                fileInput.click();
+            });
+            
+            // 文件选择处理
+            fileInput.addEventListener('change', handleFiles);
+            dragArea.addEventListener('drop', handleFiles);
+            
+            function handleFiles(e) {
+                const files = e.dataTransfer ? e.dataTransfer.files : fileInput.files;
+                if (!files.length) return;
+                
+                // 清空历史解析信息
+                clearPreviousResults();
+                
+                errorMessage.classList.add('hidden');
+                statusText.textContent = '正在解析文件...';
+                
+                const file = files[0];
+                fileInfo.textContent = `已选择文件: ${file.name}`;
+                if (!file.name.endsWith('.log')) {
+                    showError('请上传 .log 格式的日志文件');
+                    return;
+                }
+                
+                const reader = new FileReader();
+                reader.onload = function(event) {
+                    processLogFile(event.target.result, file.name);
+                };
+                reader.onerror = function() {
+                    showError('读取文件时出错');
+                };
+                reader.readAsText(file);
+            }
+            
+            function clearPreviousResults() {
+                // 清空所有结果展示区域
+                document.getElementById('versionInfo').classList.add('hidden');
+                document.getElementById('cpuInfo').classList.add('hidden');
+                document.getElementById('memoryInfo').classList.add('hidden');
+                document.getElementById('psuInfo').classList.add('hidden');
+                document.getElementById('pcieInfo').classList.add('hidden');
+                document.getElementById('networkInfo').classList.add('hidden');
+                document.getElementById('fanInfo').classList.add('hidden');
+                document.getElementById('diskbackplaneInfo').classList.add('hidden');
+                document.getElementById('fruInfo').classList.add('hidden');
+                document.getElementById('hddInfo').classList.add('hidden');
+                document.getElementById('unparsedInfo').classList.add('hidden');
+                
+                // 清空表格内容
+                document.getElementById('versionTable').innerHTML = '';
+                document.getElementById('cpuTable').innerHTML = '';
+                document.getElementById('memoryTable').innerHTML = '';
+                document.getElementById('psuTable').innerHTML = '';
+                document.getElementById('batteryTable').innerHTML = '';
+                document.getElementById('pcieTable').innerHTML = '';
+                document.getElementById('networkTable').innerHTML = '';
+                document.getElementById('fanTable').innerHTML = '';
+                document.getElementById('diskbackplaneTable').innerHTML = '';
+                document.getElementById('fruTable').innerHTML = '';
+                document.getElementById('hddTable').innerHTML = '';
+                document.getElementById('unparsedContent').innerHTML = '';
+            }
+            
+            function processLogFile(content, fileName) {
+                try {
+                    const lines = content.split('\n');
+                    const results = {
+                        versionInfo: null,
+                        cpuInfo: null,
+                        memoryInfo: null,
+                        psuInfo: null,
+                        pcieInfo: null,
+                        networkInfo: null,
+                        fanInfo: null,
+                        diskbackplaneInfo: null,
+                        fruInfo: null,
+                        hddInfo: null
+                    };
+                    
+                    let currentSection = null;
+                    let unparsedLines = [];
+                    
+                    lines.forEach(line => {
+                        if (line.trim() === 'RESTful version info:') {
+                            currentSection = 'versionInfo';
+                        } else if (line.trim() === 'RESTful CPU info:') {
+                            currentSection = 'cpuInfo';
+                        } else if (line.trim() === 'RESTful Memory info:') {
+                            currentSection = 'memoryInfo';
+                        } else if (line.trim() === 'RESTful PSU info:') {
+                            currentSection = 'psuInfo';
+                        } else if (line.trim() === 'RESTful PCIE Device info:') {
+                            currentSection = 'pcieInfo';
+                        } else if (line.trim() === 'RESTful Network Adapter info:') {
+                            currentSection = 'networkInfo';
+                        } else if (line.trim() === 'RESTful fan info:') {
+                            currentSection = 'fanInfo';
+                        } else if (line.trim() === 'RESTful diskbackplane info:') {
+                            currentSection = 'diskbackplaneInfo';
+                        } else if (line.trim() === 'RESTful FRU info:') {
+                            currentSection = 'fruInfo';
+                        } else if (line.trim() === 'RESTful HDD info:') {
+                            currentSection = 'hddInfo';
+                        } else if (currentSection && line.trim() !== '') {
+                            try {
+                                const parsedData = JSON.parse(line.trim());
+                                
+                                // Check if the parsed data contains error information
+                                if (parsedData.hasOwnProperty('error')) {
+                                    results[currentSection] = parsedData;
+                                } else {
+                                    results[currentSection] = parsedData;
+                                }
+                                
+                                currentSection = null;
+                            } catch (e) {
+                                unparsedLines.push(line);
+                            }
+                        } else if (!currentSection && line.trim() !== '') {
+                            unparsedLines.push(line);
+                        }
+                    });
+                    
+                    displayResults(results);
+                    displayUnparsedContent(unparsedLines);
+                    
+                    statusText.textContent = `${fileName} 解析完成`;
+                } catch (error) {
+                    console.error('处理文件时出错:', error);
+                    showError('解析日志文件时出错：' + error.message);
+                }
+            }
+            
+            function displayResults(results) {
+                if (results.versionInfo) {
+                    displayVersionInfo(results.versionInfo);
+                    document.getElementById('versionInfo').classList.remove('hidden');
+                }
+                
+                if (results.cpuInfo) {
+                    displayCpuInfo(results.cpuInfo);
+                    document.getElementById('cpuInfo').classList.remove('hidden');
+                }
+                
+                if (results.memoryInfo) {
+                    displayMemoryInfo(results.memoryInfo);
+                    document.getElementById('memoryInfo').classList.remove('hidden');
+                }
+                
+                if (results.psuInfo) {
+                    displayPsuInfo(results.psuInfo);
+                    displayBatteryInfo(results.psuInfo.storage_batteries);
+                    document.getElementById('psuInfo').classList.remove('hidden');
+                }
+                
+                if (results.pcieInfo) {
+                    displayPcieInfo(results.pcieInfo);
+                    document.getElementById('pcieInfo').classList.remove('hidden');
+                }
+                
+                if (results.networkInfo) {
+                    displayNetworkInfo(results.networkInfo);
+                    document.getElementById('networkInfo').classList.remove('hidden');
+                }
+                
+                if (results.fanInfo) {
+                    displayFanInfo(results.fanInfo);
+                    document.getElementById('fanInfo').classList.remove('hidden');
+                }
+                
+                if (results.diskbackplaneInfo) {
+                    displayDiskbackplaneInfo(results.diskbackplaneInfo);
+                    document.getElementById('diskbackplaneInfo').classList.remove('hidden');
+                }
+                
+                if (results.fruInfo) {
+                    displayFruInfo(results.fruInfo);
+                    document.getElementById('fruInfo').classList.remove('hidden');
+                }
+                
+                if (results.hddInfo) {
+                    displayHddInfo(results.hddInfo);
+                    document.getElementById('hddInfo').classList.remove('hidden');
+                }
+                
+                if (Object.values(results).some(value => value !== null)) {
+                    resultsContainer.style.display = 'block';
+                } else {
+                    showError('未找到可解析的RESTful信息');
+                }
+            }
+            
+            function displayUnparsedContent(lines) {
+                if (lines.length > 0) {
+                    const unparsedContent = document.getElementById('unparsedContent');
+                    unparsedContent.textContent = lines.join('\n');
+                    document.getElementById('unparsedInfo').classList.remove('hidden');
+                }
+            }
+            
+            function displayVersionInfo(data) {
+                const tableContainer = document.getElementById('versionTable');
+                tableContainer.innerHTML = '';
+                
+                if (data.error) {
+                    const errorContent = document.createElement('div');
+                    errorContent.className = 'error-content';
+                    errorContent.textContent = JSON.stringify(data, null, 2);
+                    
+                    tableContainer.appendChild(errorContent);
+                } else {
+                    const table = document.createElement('table');
+                
+                    const headers = ['ID', 'Device Name', 'Version'];
+                    const thead = document.createElement('thead');
+                    const headerRow = document.createElement('tr');
+                
+                    headers.forEach(header => {
+                        const th = document.createElement('th');
+                        th.textContent = header;
+                        headerRow.appendChild(th);
+                    });
+                
+                    thead.appendChild(headerRow);
+                    table.appendChild(thead);
+                
+                    const tbody = document.createElement('tbody');
+                    data.forEach(item => {
+                        const row = document.createElement('tr');
+                        
+                        const idCell = document.createElement('td');
+                        idCell.textContent = item.id;
+                        row.appendChild(idCell);
+                        
+                        const nameCell = document.createElement('td');
+                        nameCell.textContent = item.dev_name;
+                        row.appendChild(nameCell);
+                        
+                        const versionCell = document.createElement('td');
+                        versionCell.textContent = item.dev_version;
+                        row.appendChild(versionCell);
+                        
+                        tbody.appendChild(row);
+                    });
+                
+                    table.appendChild(tbody);
+                    tableContainer.appendChild(table);
+                }
+            }
+            
+            function displayCpuInfo(data) {
+                const tableContainer = document.getElementById('cpuTable');
+                tableContainer.innerHTML = '';
+                
+                if (data.error) {
+                    const errorContent = document.createElement('div');
+                    errorContent.className = 'error-content';
+                    errorContent.textContent = JSON.stringify(data, null, 2);
+                    
+                    const userWarning = document.createElement('div');
+                    userWarning.style.marginTop = '10px';
+                    userWarning.style.color = '#e74c3c';
+                    userWarning.style.fontWeight = 'bold';
+                    userWarning.textContent = "提示：机器疑似没有开机，源文件缺失无法解析。";
+                    
+                    tableContainer.appendChild(errorContent);
+                    tableContainer.appendChild(userWarning);
+                } else {
+                    if (!Array.isArray(data.processors)) {
+                        showError('CPU 信息格式错误，无法解析');
+                        return;
+                    }
+                    
+                    const table = document.createElement('table');
+                
+                    const headers = ['Processor ID', 'Name', 'Status', 'Cores', 'Threads', 'Speed MHz', 'Max Speed MHz'];
+                    const thead = document.createElement('thead');
+                    const headerRow = document.createElement('tr');
+                
+                    headers.forEach(header => {
+                        const th = document.createElement('th');
+                        th.textContent = header;
+                        headerRow.appendChild(th);
+                    });
+                
+                    thead.appendChild(headerRow);
+                    table.appendChild(thead);
+                
+                    const tbody = document.createElement('tbody');
+                    data.processors.forEach(item => {
+                        const row = document.createElement('tr');
+                        
+                        const idCell = document.createElement('td');
+                        idCell.textContent = item.proc_id;
+                        row.appendChild(idCell);
+                        
+                        const nameCell = document.createElement('td');
+                        nameCell.textContent = item.proc_name;
+                        row.appendChild(nameCell);
+                        
+                        const statusCell = document.createElement('td');
+                        statusCell.textContent = item.status;
+                        row.appendChild(statusCell);
+                        
+                        const coresCell = document.createElement('td');
+                        coresCell.textContent = item.proc_core_count;
+                        row.appendChild(coresCell);
+                        
+                        const threadsCell = document.createElement('td');
+                        threadsCell.textContent = item.proc_thread_count;
+                        row.appendChild(threadsCell);
+                        
+                        const speedCell = document.createElement('td');
+                        speedCell.textContent = item.proc_speed;
+                        row.appendChild(speedCell);
+                        
+                        const maxSpeedCell = document.createElement('td');
+                        maxSpeedCell.textContent = item.MaxSpeedMHz || item.max_speed || 'N/A';
+                        row.appendChild(maxSpeedCell);
+                        
+                        tbody.appendChild(row);
+                    });
+                
+                    table.appendChild(tbody);
+                    tableContainer.appendChild(table);
+                }
+            }
+            
+            function displayMemoryInfo(data) {
+                const tableContainer = document.getElementById('memoryTable');
+                tableContainer.innerHTML = '';
+                
+                if (data.error) {
+                    const errorContent = document.createElement('div');
+                    errorContent.className = 'error-content';
+                    errorContent.textContent = JSON.stringify(data, null, 2);
+                    
+                    tableContainer.appendChild(errorContent);
+                } else {
+                    if (!Array.isArray(data.mem_modules)) {
+                        showError('内存信息格式错误，无法解析');
+                        return;
+                    }
+                    
+                    const table = document.createElement('table');
+                
+                    const headers = ['ID', 'Slot', 'Size (GB)', 'Type', 'Frequency', 'Current Frequency', 'Status', 'Vendor', 'Part Number', 'Serial Number']; // 新增Part Number列
+                    const thead = document.createElement('thead');
+                    const headerRow = document.createElement('tr');
+                
+                    headers.forEach(header => {
+                        const th = document.createElement('th');
+                        th.textContent = header;
+                        headerRow.appendChild(th);
+                    });
+                
+                    thead.appendChild(headerRow);
+                    table.appendChild(thead);
+                
+                    const tbody = document.createElement('tbody');
+                    data.mem_modules.forEach(item => {
+                        const row = document.createElement('tr');
+                        
+                        const idCell = document.createElement('td');
+                        idCell.textContent = item.mem_mod_id;
+                        row.appendChild(idCell);
+                        
+                        const slotCell = document.createElement('td');
+                        slotCell.textContent = item.mem_mod_slot;
+                        row.appendChild(slotCell);
+                        
+                        const sizeCell = document.createElement('td');
+                        sizeCell.textContent = item.mem_mod_size;
+                        row.appendChild(sizeCell);
+                        
+                        const typeCell = document.createElement('td');
+                        typeCell.textContent = item.mem_mod_type;
+                        row.appendChild(typeCell);
+                        
+                        const freqCell = document.createElement('td');
+                        freqCell.textContent = item.mem_mod_frequency;
+                        row.appendChild(freqCell);
+                        
+                        const currFreqCell = document.createElement('td');
+                        currFreqCell.textContent = item.mem_mod_current_frequency;
+                        row.appendChild(currFreqCell);
+                        
+                        const statusCell = document.createElement('td');
+                        statusCell.textContent = item.status;
+                        row.appendChild(statusCell);
+                        
+                        const vendorCell = document.createElement('td');
+                        vendorCell.textContent = item.mem_mod_vendor;
+                        row.appendChild(vendorCell);
+
+                        // 新增Part Number列
+                        const partNumCell = document.createElement('td');
+                        partNumCell.textContent = item.mem_mod_part_num;
+                        row.appendChild(partNumCell);
+                        
+                        const serialCell = document.createElement('td');
+                        serialCell.textContent = item.mem_mod_serial_num;
+                        row.appendChild(serialCell);
+                       
+                        tbody.appendChild(row);
+                    });
+                
+                    const summaryRow = document.createElement('tr');
+                    const summaryCell = document.createElement('td');
+                    summaryCell.colSpan = headers.length;
+                    summaryCell.textContent = `总计内存: ${data.mem_total_mem_size} GB (${data.present_memory_count}/${data.total_memory_count} 插槽已使用)`;
+                    summaryCell.style.fontWeight = 'bold';
+                    summaryRow.appendChild(summaryCell);
+                    tbody.appendChild(summaryRow);
+                
+                    table.appendChild(tbody);
+                    tableContainer.appendChild(table);
+                }
+            }
+            
+            function displayPsuInfo(data) {
+                const tableContainer = document.getElementById('psuTable');
+                tableContainer.innerHTML = '';
+                
+                if (data.error) {
+                    const errorContent = document.createElement('div');
+                    errorContent.className = 'error-content';
+                    errorContent.textContent = JSON.stringify(data, null, 2);
+                    
+                    tableContainer.appendChild(errorContent);
+                } else {
+                    if (!Array.isArray(data.power_supplies)) {
+                        showError('电源信息格式错误，无法解析');
+                        return;
+                    }
+                    
+                    const table = document.createElement('table');
+                
+                    const headers = ['ID', 'Present', 'Status', 'Model', 'Serial Number', 'Firmware', 'Input Power', 'Output Power', 'Fan Speed', 'Temperature'];
+                    const thead = document.createElement('thead');
+                    const headerRow = document.createElement('tr');
+                
+                    headers.forEach(header => {
+                        const th = document.createElement('th');
+                        th.textContent = header;
+                        headerRow.appendChild(th);
+                    });
+                
+                    thead.appendChild(headerRow);
+                    table.appendChild(thead);
+                
+                    const tbody = document.createElement('tbody');
+                    data.power_supplies.forEach(item => {
+                        const row = document.createElement('tr');
+                        
+                        const idCell = document.createElement('td');
+                        idCell.textContent = item.id;
+                        row.appendChild(idCell);
+                        
+                        const presentCell = document.createElement('td');
+                        presentCell.textContent = item.present ? '是' : '否';
+                        row.appendChild(presentCell);
+                        
+                        const statusCell = document.createElement('td');
+                        statusCell.textContent = item.status;
+                        row.appendChild(statusCell);
+                        
+                        const modelCell = document.createElement('td');
+                        modelCell.textContent = item.model;
+                        row.appendChild(modelCell);
+                        
+                        const serialCell = document.createElement('td');
+                        serialCell.textContent = item.serial_num;
+                        row.appendChild(serialCell);
+                        
+                        const firmwareCell = document.createElement('td');
+                        firmwareCell.textContent = item.fw_ver;
+                        row.appendChild(firmwareCell);
+                        
+                        const inputPowerCell = document.createElement('td');
+                        inputPowerCell.textContent = `${item.ps_in_power} W`;
+                        row.appendChild(inputPowerCell);
+                        
+                        const outputPowerCell = document.createElement('td');
+                        outputPowerCell.textContent = `${item.ps_out_power} W`;
+                        row.appendChild(outputPowerCell);
+                        
+                        const fanSpeedCell = document.createElement('td');
+                        fanSpeedCell.textContent = `${item.ps_fan_speed} RPM`;
+                        row.appendChild(fanSpeedCell);
+                        
+                        const tempCell = document.createElement('td');
+                        tempCell.textContent = `${item.primary_temperature} °C`;
+                        row.appendChild(tempCell);
+                        
+                        tbody.appendChild(row);
+                    });
+                
+                    const summaryRow = document.createElement('tr');
+                    const summaryCell = document.createElement('td');
+                    summaryCell.colSpan = headers.length;
+                    summaryCell.textContent = `总电源负载: ${data.present_power_reading} W | 冗余状态: ${data.power_supplies_redundant}`;
+                    summaryCell.style.fontWeight = 'bold';
+                    summaryRow.appendChild(summaryCell);
+                    tbody.appendChild(summaryRow);
+                
+                    table.appendChild(tbody);
+                    tableContainer.appendChild(table);
+                }
+            }
+            
+            function displayBatteryInfo(data) {
+                const tableContainer = document.getElementById('batteryTable');
+                tableContainer.innerHTML = '';
+                
+                if (!data || data.length === 0) {
+                    tableContainer.textContent = '无storage_batteries信息';
+                    return;
+                }
+                
+                const table = document.createElement('table');
+                
+                const headers = ['ID', 'Present', 'Condition', 'Model', 'Serial Number', 'Max Capacity (Watts)', 'Firmware Version'];
+                const thead = document.createElement('thead');
+                const headerRow = document.createElement('tr');
+                
+                headers.forEach(header => {
+                    const th = document.createElement('th');
+                    th.textContent = header;
+                    headerRow.appendChild(th);
+                });
+                
+                thead.appendChild(headerRow);
+                table.appendChild(thead);
+                
+                const tbody = document.createElement('tbody');
+                data.forEach(item => {
+                    const row = document.createElement('tr');
+                    
+                    const idCell = document.createElement('td');
+                    idCell.textContent = item.id;
+                    row.appendChild(idCell);
+                    
+                    const presentCell = document.createElement('td');
+                    presentCell.textContent = item.present ? '是' : '否';
+                    row.appendChild(presentCell);
+                    
+                    const conditionCell = document.createElement('td');
+                    conditionCell.textContent = item.condition;
+                    row.appendChild(conditionCell);
+                    
+                    const modelCell = document.createElement('td');
+                    modelCell.textContent = item.model;
+                    row.appendChild(modelCell);
+                    
+                    const serialCell = document.createElement('td');
+                    serialCell.textContent = item.serial_num;
+                    row.appendChild(serialCell);
+                    
+                    const capacityCell = document.createElement('td');
+                    capacityCell.textContent = item.max_cap_watts;
+                    row.appendChild(capacityCell);
+                    
+                    const firmwareCell = document.createElement('td');
+                    firmwareCell.textContent = item.fw_ver;
+                    row.appendChild(firmwareCell);
+                    
+                    tbody.appendChild(row);
+                });
+                
+                table.appendChild(tbody);
+                tableContainer.appendChild(table);
+            }
+            
+            function displayPcieInfo(data) {
+                const tableContainer = document.getElementById('pcieTable');
+                tableContainer.innerHTML = '';
+                
+                if (data.error) {
+                    const errorContent = document.createElement('div');
+                    errorContent.className = 'error-content';
+                    errorContent.textContent = JSON.stringify(data, null, 2);
+                    
+                    tableContainer.appendChild(errorContent);
+                } else {
+                    if (!Array.isArray(data)) {
+                        showError('PCIe 信息格式错误，无法解析');
+                        return;
+                    }
+                    
+                    const table = document.createElement('table');
+                
+                    const headers = ['ID', 'Present', 'Status', 'Vendor', 'Device', 'Location', 'Slot', 'Max Link Width', 'Current Link Width', 'Max Link Speed', 'Current Link Speed', 'BDFNUM', 'Root BDFNUM'];
+                    const thead = document.createElement('thead');
+                    const headerRow = document.createElement('tr');
+                
+                    headers.forEach(header => {
+                        const th = document.createElement('th');
+                        th.textContent = header;
+                        headerRow.appendChild(th);
+                    });
+                
+                    thead.appendChild(headerRow);
+                    table.appendChild(thead);
+                
+                    const tbody = document.createElement('tbody');
+                    data.forEach(item => {
+                        const row = document.createElement('tr');
+                        
+                        const idCell = document.createElement('td');
+                        idCell.textContent = item.id;
+                        row.appendChild(idCell);
+                        
+                        const presentCell = document.createElement('td');
+                        presentCell.textContent = item.present ? '是' : '否';
+                        row.appendChild(presentCell);
+                        
+                        const statusCell = document.createElement('td');
+                        statusCell.textContent = item.status ? '启用' : '禁用';
+                        row.appendChild(statusCell);
+                        
+                        const vendorCell = document.createElement('td');
+                        vendorCell.textContent = item.vendor_name;
+                        row.appendChild(vendorCell);
+                        
+                        const deviceCell = document.createElement('td');
+                        deviceCell.textContent = item.device_name;
+                        row.appendChild(deviceCell);
+                        
+                        const locationCell = document.createElement('td');
+                        locationCell.textContent = item.location;
+                        row.appendChild(locationCell);
+                        
+                        const slotCell = document.createElement('td');
+                        slotCell.textContent = item.slot;
+                        row.appendChild(slotCell);
+                        
+                        const maxLinkWidthCell = document.createElement('td');
+                        maxLinkWidthCell.textContent = item.max_link_width;
+                        row.appendChild(maxLinkWidthCell);
+                        
+                        const currLinkWidthCell = document.createElement('td');
+                        currLinkWidthCell.textContent = item.current_link_width;
+                        row.appendChild(currLinkWidthCell);
+                        
+                        const maxLinkSpeedCell = document.createElement('td');
+                        maxLinkSpeedCell.textContent = item.max_link_speed;
+                        row.appendChild(maxLinkSpeedCell);
+                        
+                        const currLinkSpeedCell = document.createElement('td');
+                        currLinkSpeedCell.textContent = item.current_link_speed;
+                        row.appendChild(currLinkSpeedCell);
+                        
+                        const bdfnumCell = document.createElement('td');
+                        bdfnumCell.textContent = item.bdfnum;
+                        row.appendChild(bdfnumCell);
+                        
+                        const rootBdfnumCell = document.createElement('td');
+                        rootBdfnumCell.textContent = item.root_bdfnum;
+                        row.appendChild(rootBdfnumCell);
+                        
+                        tbody.appendChild(row);
+                    });
+                
+                    table.appendChild(tbody);
+                    tableContainer.appendChild(table);
+                }
+            }
+            
+            function displayNetworkInfo(data) {
+                const tableContainer = document.getElementById('networkTable');
+                tableContainer.innerHTML = '';
+                
+                if (data.error) {
+                    const errorContent = document.createElement('div');
+                    errorContent.className = 'error-content';
+                    errorContent.textContent = JSON.stringify(data, null, 2);
+                    
+                    tableContainer.appendChild(errorContent);
+                } else {
+                    if (!data.sys_adapters || !Array.isArray(data.sys_adapters)) {
+                        showError('网络适配器信息格式错误，无法解析');
+                        return;
+                    }
+                    
+                    const table = document.createElement('table');
+                
+                    const headers = ['Adapter ID', 'Location', 'MAC Address', 'Status', 'Ports', 'Vendor', 'Model', 'Serial Number', 'Product Number'];
+                    const thead = document.createElement('thead');
+                    const headerRow = document.createElement('tr');
+                
+                    headers.forEach(header => {
+                        const th = document.createElement('th');
+                        th.textContent = header;
+                        headerRow.appendChild(th);
+                    });
+                
+                    thead.appendChild(headerRow);
+                    table.appendChild(thead);
+                
+                    const tbody = document.createElement('tbody');
+                    data.sys_adapters.forEach(adapter => {
+                        const row = document.createElement('tr');
+                        
+                        const idCell = document.createElement('td');
+                        idCell.textContent = adapter.id;
+                        row.appendChild(idCell);
+                        
+                        const locationCell = document.createElement('td');
+                        locationCell.textContent = adapter.location;
+                        row.appendChild(locationCell);
+                        
+                        const macCell = document.createElement('td');
+                        macCell.textContent = adapter.ports ? adapter.ports.map(port => port.mac_addr).join(', ') : '';
+                        row.appendChild(macCell);
+                        
+                        const statusCell = document.createElement('td');
+                        statusCell.textContent = adapter.status;
+                        row.appendChild(statusCell);
+                        
+                        const portsCell = document.createElement('td');
+                        portsCell.textContent = adapter.port_num;
+                        row.appendChild(portsCell);
+                        
+                        const vendorCell = document.createElement('td');
+                        vendorCell.textContent = adapter.vendor;
+                        row.appendChild(vendorCell);
+                        
+                        const modelCell = document.createElement('td');
+                        modelCell.textContent = adapter.model;
+                        row.appendChild(modelCell);
+                        
+                        const serialNumberCell = document.createElement('td');
+                        serialNumberCell.textContent = adapter.sn;
+                        row.appendChild(serialNumberCell);
+                        
+                        const productNumberCell = document.createElement('td');
+                        productNumberCell.textContent = adapter.pn;
+                        row.appendChild(productNumberCell);
+                        
+                        tbody.appendChild(row);
+                    });
+                
+                    table.appendChild(tbody);
+                    tableContainer.appendChild(table);
+                }
+            }
+            
+            function displayFanInfo(data) {
+                const tableContainer = document.getElementById('fanTable');
+                tableContainer.innerHTML = '';
+                
+                if (data.error) {
+                    const errorContent = document.createElement('div');
+                    errorContent.className = 'error-content';
+                    errorContent.textContent = JSON.stringify(data, null, 2);
+                    
+                    tableContainer.appendChild(errorContent);
+                } else {
+                    if (!data.fans || !Array.isArray(data.fans)) {
+                        showError('风扇信息格式错误，无法解析');
+                        return;
+                    }
+                    
+                    const table = document.createElement('table');
+                
+                    const headers = ['ID', 'Name', 'Status', 'Speed RPM', 'Speed %', 'Max Speed RPM', 'Model'];
+                    const thead = document.createElement('thead');
+                    const headerRow = document.createElement('tr');
+                
+                    headers.forEach(header => {
+                        const th = document.createElement('th');
+                        th.textContent = header;
+                        headerRow.appendChild(th);
+                    });
+                
+                    thead.appendChild(headerRow);
+                    table.appendChild(thead);
+                
+                    const tbody = document.createElement('tbody');
+                    data.fans.forEach(fan => {
+                        const row = document.createElement('tr');
+                        
+                        const idCell = document.createElement('td');
+                        idCell.textContent = fan.id;
+                        row.appendChild(idCell);
+                        
+                        const nameCell = document.createElement('td');
+                        nameCell.textContent = fan.fan_name;
+                        row.appendChild(nameCell);
+                        
+                        const statusCell = document.createElement('td');
+                        statusCell.textContent = fan.status_str;
+                        row.appendChild(statusCell);
+                        
+                        const speedRpmCell = document.createElement('td');
+                        speedRpmCell.textContent = fan.speed_rpm;
+                        row.appendChild(speedRpmCell);
+                        
+                        const speedPercentCell = document.createElement('td');
+                        speedPercentCell.textContent = `${fan.speed_percent}%`;
+                        row.appendChild(speedPercentCell);
+                        
+                        const maxSpeedCell = document.createElement('td');
+                        maxSpeedCell.textContent = fan.max_speed_rpm;
+                        row.appendChild(maxSpeedCell);
+                        
+                        const modelCell = document.createElement('td');
+                        modelCell.textContent = fan.fan_model;
+                        row.appendChild(modelCell);
+                        
+                        tbody.appendChild(row);
+                    });
+                
+                    const summaryRow = document.createElement('tr');
+                    const summaryCell = document.createElement('td');
+                    summaryCell.colSpan = headers.length;
+                    summaryCell.textContent = `风扇总功率: ${data.fans_power} W`;
+                    summaryCell.style.fontWeight = 'bold';
+                    summaryRow.appendChild(summaryCell);
+                    tbody.appendChild(summaryRow);
+                
+                    table.appendChild(tbody);
+                    tableContainer.appendChild(table);
+                }
+            }
+            
+            function displayDiskbackplaneInfo(data) {
+                const tableContainer = document.getElementById('diskbackplaneTable');
+                tableContainer.innerHTML = '';
+                
+                if (data.error) {
+                    const errorContent = document.createElement('div');
+                    errorContent.className = 'error-content';
+                    errorContent.textContent = JSON.stringify(data, null, 2);
+                    
+                    tableContainer.appendChild(errorContent);
+                } else {
+                    if (!Array.isArray(data)) {
+                        showError('磁盘背板信息格式错误，无法解析');
+                        return;
+                    }
+                    
+                    const table = document.createElement('table');
+                
+                    const headers = ['Port Count', 'Driver Count', 'Front', 'Backplane Index', 'Present', 'CPLD Version', 'Temperature'];
+                    const thead = document.createElement('thead');
+                    const headerRow = document.createElement('tr');
+                
+                    headers.forEach(header => {
+                        const th = document.createElement('th');
+                        th.textContent = header;
+                        headerRow.appendChild(th);
+                    });
+                
+                    thead.appendChild(headerRow);
+                    table.appendChild(thead);
+                
+                    const tbody = document.createElement('tbody');
+                    data.forEach(item => {
+                        const row = document.createElement('tr');
+                        
+                        const portCountCell = document.createElement('td');
+                        portCountCell.textContent = item.port_count;
+                        row.appendChild(portCountCell);
+                        
+                        const driverCountCell = document.createElement('td');
+                        driverCountCell.textContent = item.driver_count;
+                        row.appendChild(driverCountCell);
+                        
+                        const frontCell = document.createElement('td');
+                        frontCell.textContent = item.front;
+                        row.appendChild(frontCell);
+                        
+                        const backplaneIndexCell = document.createElement('td');
+                        backplaneIndexCell.textContent = item.backplane_index;
+                        row.appendChild(backplaneIndexCell);
+                        
+                        const presentCell = document.createElement('td');
+                        presentCell.textContent = item.present ? '是' : '否';
+                        row.appendChild(presentCell);
+                        
+                        const cpldVersionCell = document.createElement('td');
+                        cpldVersionCell.textContent = item.cpld_version;
+                        row.appendChild(cpldVersionCell);
+                        
+                        const tempCell = document.createElement('td');
+                        tempCell.textContent = `${item.temperature} °C`;
+                        row.appendChild(tempCell);
+                        
+                        tbody.appendChild(row);
+                    });
+                
+                    table.appendChild(tbody);
+                    tableContainer.appendChild(table);
+                }
+            }
+            
+            function displayFruInfo(data) {
+                const tableContainer = document.getElementById('fruTable');
+                tableContainer.innerHTML = '';
+                
+                if (data.error) {
+                    const errorContent = document.createElement('div');
+                    errorContent.className = 'error-content';
+                    errorContent.textContent = JSON.stringify(data, null, 2);
+                    
+                    tableContainer.appendChild(errorContent);
+                } else {
+                    if (!Array.isArray(data)) {
+                        showError('FRU 信息格式错误，无法解析');
+                        return;
+                    }
+                    
+                    const table = document.createElement('table');
+                
+                    const headers = ['Device ID', 'Device Name', 'FRU Type', 'Manufacturer', 'Product Name', 'Serial Number', 'Part Number', 'Version'];
+                    const thead = document.createElement('thead');
+                    const headerRow = document.createElement('tr');
+                
+                    headers.forEach(header => {
+                        const th = document.createElement('th');
+                        th.textContent = header;
+                        headerRow.appendChild(th);
+                    });
+                
+                    thead.appendChild(headerRow);
+                    table.appendChild(thead);
+                
+                    const tbody = document.createElement('tbody');
+                    data.forEach(item => {
+                        const row = document.createElement('tr');
+                        
+                        const deviceIdCell = document.createElement('td');
+                        deviceIdCell.textContent = item.device.id;
+                        row.appendChild(deviceIdCell);
+                        
+                        const deviceNameCell = document.createElement('td');
+                        deviceNameCell.textContent = item.device.name;
+                        row.appendChild(deviceNameCell);
+                        
+                        const fruTypeCell = document.createElement('td');
+                        fruTypeCell.textContent = item.device.name.includes('MB_FRU') ? 'Main Board' : 
+                                                  item.device.name.includes('HDD_F_BP0_FRU') ? 'HDD Backplane' : 
+                                                  item.device.name.includes('PSU') ? 'Power Supply' : 'Unknown';
+                        row.appendChild(fruTypeCell);
+                        
+                        const manufacturerCell = document.createElement('td');
+                        manufacturerCell.textContent = item.board.manufacturer || item.product.manufacturer;
+                        row.appendChild(manufacturerCell);
+                        
+                        const productNameCell = document.createElement('td');
+                        productNameCell.textContent = item.board.product_name || item.product.product_name;
+                        row.appendChild(productNameCell);
+                        
+                        const serialNumberCell = document.createElement('td');
+                        serialNumberCell.textContent = item.board.serial_number || item.product.serial_number;
+                        row.appendChild(serialNumberCell);
+                        
+                        const partNumberCell = document.createElement('td');
+                        partNumberCell.textContent = item.board.part_number || item.product.part_number;
+                        row.appendChild(partNumberCell);
+                        
+                        const versionCell = document.createElement('td');
+                        versionCell.textContent = item.product.product_version || item.device.device_uuid;
+                        row.appendChild(versionCell);
+                        
+                        tbody.appendChild(row);
+                    });
+                
+                    table.appendChild(tbody);
+                    tableContainer.appendChild(table);
+                }
+            }
+            
+            function displayHddInfo(data) {
+                const tableContainer = document.getElementById('hddTable');
+                tableContainer.innerHTML = '';
+                
+                if (data.error) {
+                    const errorContent = document.createElement('div');
+                    errorContent.className = 'error-content';
+                    errorContent.textContent = JSON.stringify(data, null, 2);
+                    
+                    tableContainer.appendChild(errorContent);
+                } else {
+                    if (!Array.isArray(data)) {
+                        showError('HDD 信息格式错误，无法解析');
+                        return;
+                    }
+                    
+                    const table = document.createElement('table');
+                
+                    const headers = ['ID', 'Present', 'Enable', 'SN', 'Manufacture', 'Model', 'Capacity (GB)', 'Location', 'Firmware'];
+                    const thead = document.createElement('thead');
+                    const headerRow = document.createElement('tr');
+                
+                    headers.forEach(header => {
+                        const th = document.createElement('th');
+                        th.textContent = header;
+                        headerRow.appendChild(th);
+                    });
+                
+                    thead.appendChild(headerRow);
+                    table.appendChild(thead);
+                
+                    const tbody = document.createElement('tbody');
+                    data.forEach(item => {
+                        const row = document.createElement('tr');
+                        
+                        const idCell = document.createElement('td');
+                        idCell.textContent = item.id;
+                        row.appendChild(idCell);
+                        
+                        const presentCell = document.createElement('td');
+                        presentCell.textContent = item.present ? '是' : '否';
+                        row.appendChild(presentCell);
+                        
+                        const enableCell = document.createElement('td');
+                        enableCell.textContent = item.enable ? '是' : '否';
+                        row.appendChild(enableCell);
+                        
+                        const snCell = document.createElement('td');
+                        snCell.textContent = item.SN;
+                        row.appendChild(snCell);
+                        
+                        const manufactureCell = document.createElement('td');
+                        manufactureCell.textContent = item.manufacture;
+                        row.appendChild(manufactureCell);
+                        
+                        const modelCell = document.createElement('td');
+                        modelCell.textContent = item.model;
+                        row.appendChild(modelCell);
+                        
+                        const capacityCell = document.createElement('td');
+                        capacityCell.textContent = item.capacity;
+                        row.appendChild(capacityCell);
+                        
+                        const locationCell = document.createElement('td');
+                        locationCell.textContent = item.location;
+                        row.appendChild(locationCell);
+                        
+                        const firmwareCell = document.createElement('td');
+                        firmwareCell.textContent = item.firmware;
+                        row.appendChild(firmwareCell);
+                        
+                        tbody.appendChild(row);
+                    });
+                
+                    table.appendChild(tbody);
+                    tableContainer.appendChild(table);
+                }
+            }
+            
+            function showError(message) {
+                errorMessage.textContent = message;
+                errorMessage.classList.remove('hidden');
+                resultsContainer.style.display = 'none';
+            }
+        });
+    </script>
+</body>
+</html>
